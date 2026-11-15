@@ -147,6 +147,9 @@ th.num, td.num { text-align: right; }
   let curTab = 'overview'; // 'overview', 'diagnosis', or model id
   let diagQuery = '';
   let diagHorizon = 'all';
+  let modelStockQuery = '';
+  let modelStockPick = '';
+  let modelHorizon = 'all';
 
   $('btnTheme').onclick = () => {
     const cur = document.documentElement.getAttribute('data-theme');
@@ -211,7 +214,7 @@ th.num, td.num { text-align: right; }
       </button>
     `).join('');
     $('navBar').querySelectorAll('.tab-btn').forEach(btn => {
-      btn.onclick = () => { curTab = btn.dataset.id; renderNav(); renderMain(); };
+      btn.onclick = () => { curTab = btn.dataset.id; modelStockQuery = ''; modelStockPick = ''; modelHorizon = 'all'; renderNav(); renderMain(); };
     });
   }
 
@@ -245,7 +248,7 @@ th.num, td.num { text-align: right; }
         <div class="kpi-box">
           <div class="kpi-lbl">大盤最新收盤基準</div>
           <div class="kpi-val">${fmt(DATA.marketClose, 2)} 點</div>
-          <div class="kpi-sub class="${cls(DATA.marketChg)}">漲跌 ${pts(DATA.marketChg, 2)}</div>
+          <div class="kpi-sub ${cls(DATA.marketChg)}">漲跌 ${pts(DATA.marketChg, 2)}</div>
         </div>
         <div class="kpi-box">
           <div class="kpi-lbl">多模型共振精選標的數</div>
@@ -496,30 +499,76 @@ th.num, td.num { text-align: right; }
         </div>
       </div>
 
-      <div class="card">
-        <h2>歷史個股四時段實戰復盤（最新日期置頂）</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>進榜日期</th><th>順位</th><th>個股</th><th class="num">當沖</th><th class="num">隔日沖</th><th class="num">週 (5日)</th><th class="num">月 (20日)</th><th>診斷</th></tr>
-            </thead>
-            <tbody>
-              ${(m.stockHistory || []).map(r => `
-                <tr>
-                  <td><b>${esc(r.date)}</b></td>
-                  <td>#${r.rank}</td>
-                  <td><b>${esc(r.code)} ${esc(r.name)}</b></td>
-                  <td class="num ${cls(r.retDay)}"><b>${pct(r.retDay)}</b></td>
-                  <td class="num ${cls(r.retNext)}"><b>${pct(r.retNext)}</b></td>
-                  <td class="num ${cls(r.ret5)}"><b>${pct(r.ret5)}</b></td>
-                  <td class="num ${cls(r.ret20)}"><b>${pct(r.ret20)}</b></td>
-                  <td><span class="badge">${esc(r.tag)}</span></td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      ${(() => {
+        const sh = m.stockHistory || [];
+        const stockCountMap = new Map();
+        sh.forEach(r => {
+          const k = r.code;
+          if (!stockCountMap.has(k)) stockCountMap.set(k, {code: r.code, name: r.name, cnt: 0});
+          stockCountMap.get(k).cnt += 1;
+        });
+        const stockOptions = [...stockCountMap.values()].sort((a, b) => b.cnt - a.cnt || a.code.localeCompare(b.code));
+        const mq = modelStockQuery.trim().toLowerCase();
+        const mFiltered = sh.filter(r => {
+          if (modelStockPick && r.code !== modelStockPick) return false;
+          if (mq && !(r.code + ' ' + r.name).toLowerCase().includes(mq)) return false;
+          if (modelHorizon === 'short' && !((r.retDay != null && r.retDay >= 1.5) || (r.retNext != null && r.retNext >= 1.5))) return false;
+          if (modelHorizon === 'mid' && !(r.ret5 != null && r.ret5 >= 2.0)) return false;
+          if (modelHorizon === 'long' && !(r.ret20 != null && r.ret20 >= 2.0)) return false;
+          return true;
+        });
+        const mD = calcStats(mFiltered.map(r => r.retDay));
+        const mN = calcStats(mFiltered.map(r => r.retNext));
+        const m5 = calcStats(mFiltered.map(r => r.ret5));
+        const m20 = calcStats(mFiltered.map(r => r.ret20));
+        return `
+          <div class="card">
+            <h2>歷史個股四時段實戰復盤（最新日期置頂）</h2>
+            <div class="filter-bar">
+              <label style="font-size:0.84rem;font-weight:600">個股篩選：</label>
+              <input type="text" id="modelStockInput" value="${esc(modelStockQuery)}" placeholder="輸入代號或股名（如 1477、聚陽）" style="min-width:210px">
+              <select id="modelStockSelect">
+                <option value="">全部個股（共 ${sh.length} 筆）</option>
+                ${stockOptions.map(o => `<option value="${esc(o.code)}" ${modelStockPick===o.code?'selected':''}>${esc(o.code)} ${esc(o.name !== o.code ? o.name : '')}（${o.cnt}次）</option>`).join('')}
+              </select>
+              <select id="modelHorizonSel">
+                <option value="all" ${modelHorizon==='all'?'selected':''}>全部週期</option>
+                <option value="short" ${modelHorizon==='short'?'selected':''}>⚡ 短期強勢（當沖／隔日沖 &gt;= 1.5%）</option>
+                <option value="mid" ${modelHorizon==='mid'?'selected':''}>📈 中期強勢（5日 &gt;= 2.0%）</option>
+                <option value="long" ${modelHorizon==='long'?'selected':''}>🏦 長期強勢（20日 &gt;= 2.0%）</option>
+              </select>
+              <button class="btn" id="modelFilterClear">清除篩選</button>
+            </div>
+            <div class="kpi-grid">
+              <div class="kpi-box"><div class="kpi-lbl">⚡ 當沖平均 (T日)</div><div class="kpi-val ${cls(mD.avg)}">${pct(mD.avg)}</div><div class="kpi-sub">勝率 ${mD.win!=null?fmt(mD.win,1)+'%':'—'} (${mD.cnt}筆)</div></div>
+              <div class="kpi-box"><div class="kpi-lbl">🚀 隔日沖平均 (T+1)</div><div class="kpi-val ${cls(mN.avg)}">${pct(mN.avg)}</div><div class="kpi-sub">勝率 ${mN.win!=null?fmt(mN.win,1)+'%':'—'} (${mN.cnt}筆)</div></div>
+              <div class="kpi-box"><div class="kpi-lbl">📈 中期週平均 (5日)</div><div class="kpi-val ${cls(m5.avg)}">${pct(m5.avg)}</div><div class="kpi-sub">勝率 ${m5.win!=null?fmt(m5.win,1)+'%':'—'} (${m5.cnt}筆)</div></div>
+              <div class="kpi-box"><div class="kpi-lbl">🏦 長期月平均 (20日)</div><div class="kpi-val ${cls(m20.avg)}">${pct(m20.avg)}</div><div class="kpi-sub">勝率 ${m20.win!=null?fmt(m20.win,1)+'%':'—'} (${m20.cnt}筆)</div></div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>進榜日期</th><th>順位</th><th>個股</th><th class="num">當沖</th><th class="num">隔日沖</th><th class="num">週 (5日)</th><th class="num">月 (20日)</th><th>診斷</th></tr>
+                </thead>
+                <tbody>
+                  ${mFiltered.length ? mFiltered.map(r => `
+                    <tr>
+                      <td><b>${esc(r.date)}</b></td>
+                      <td>#${r.rank}</td>
+                      <td><b>${esc(r.code)} ${esc(r.name)}</b></td>
+                      <td class="num ${cls(r.retDay)}"><b>${pct(r.retDay)}</b></td>
+                      <td class="num ${cls(r.retNext)}"><b>${pct(r.retNext)}</b></td>
+                      <td class="num ${cls(r.ret5)}"><b>${pct(r.ret5)}</b></td>
+                      <td class="num ${cls(r.ret20)}"><b>${pct(r.ret20)}</b></td>
+                      <td><span class="badge">${esc(r.tag)}</span></td>
+                    </tr>
+                  `).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:18px">查無符合篩選條件之個股紀錄</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      })()}
     `;
   }
 
@@ -534,6 +583,22 @@ th.num, td.num { text-align: right; }
     } else {
       const m = DATA.models.find(x => x.id === curTab);
       $('mainBox').innerHTML = renderModelDetail(m);
+      const inp = $('modelStockInput');
+      if (inp) {
+        inp.oninput = e => {
+          const pos = e.target.selectionStart;
+          modelStockQuery = e.target.value;
+          renderMain();
+          const el = $('modelStockInput');
+          if (el) { el.focus(); el.setSelectionRange(pos, pos); }
+        };
+      }
+      const sel = $('modelStockSelect');
+      if (sel) sel.onchange = e => { modelStockPick = e.target.value; renderMain(); };
+      const hSel = $('modelHorizonSel');
+      if (hSel) hSel.onchange = e => { modelHorizon = e.target.value; renderMain(); };
+      const clr = $('modelFilterClear');
+      if (clr) clr.onclick = () => { modelStockQuery = ''; modelStockPick = ''; modelHorizon = 'all'; renderMain(); };
     }
   }
 
