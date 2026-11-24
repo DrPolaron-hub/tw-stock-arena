@@ -135,6 +135,7 @@ th.num, td.num { text-align: right; }
   const cls = v => (v == null || isNaN(v)) ? '' : (v > 0 ? 'up' : (v < 0 ? 'down' : ''));
 
   let DATA = JSON.parse($('arenaData').textContent);
+  function updateHdrMeta(){ const c=(DATA.marketChg!=null&&!isNaN(DATA.marketChg))?'（'+pts(DATA.marketChg,2)+'）':''; const cl=(DATA.marketClose!=null&&!isNaN(DATA.marketClose))?fmt(DATA.marketClose,2)+' 點':'—'; const ns=(DATA.models||[]).map(m=>esc(m.name)).join('・'); $('hdrMeta').innerHTML='大盤基準：'+esc(DATA.asof||'—')+' 收盤 '+cl+c+' ｜ 涵蓋模型：'+ns; }
   // Load locally imported overrides from localStorage if any
   try {
     const saved = localStorage.getItem('tw_stock_arena_overrides');
@@ -602,6 +603,7 @@ th.num, td.num { text-align: right; }
     }
   }
 
+  updateHdrMeta();
   renderNav();
   renderMain();
 })();
